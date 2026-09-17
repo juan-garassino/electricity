@@ -1,6 +1,8 @@
 # model.py
 """
 Neural network model definition and training utilities for energy price forecasting.
+Enhanced with multiple architectures: MLP, ResNet, and Transformer-based models.
+Works with single or multiple target variables from data.py pipeline.
 """
 from __future__ import annotations
 import os
@@ -8,27 +10,54 @@ import json
 import math
 import numpy as np
 from dataclasses import dataclass, asdict
-from typing import Tuple, Dict, Any, Optional, List
+from typing import Tuple, Dict, Any, Optional, List, Literal
+from enum import Enum
 
 import tensorflow as tf
 from tensorflow.keras import Sequential, Model
-from tensorflow.keras.layers import Dense, Dropout, BatchNormalization, Input
+from tensorflow.keras.layers import (
+    Dense, Dropout, BatchNormalization, Input, Conv1D, Flatten,
+    LayerNormalization, MultiHeadAttention
+)
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau, ModelCheckpoint
 from tensorflow.keras.optimizers import Adam
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 
 
+class ModelType(Enum):
+    """Available model architectures."""
+    STANDARD = "standard"
+    RESIDUAL = "residual" 
+    MLP_COMPLEX = "mlp_complex"
+    TRANSFORMER = "transformer"
+
+
 @dataclass
 class ModelConfig:
     """Configuration for neural network model."""
-    # Architecture
+    # Architecture selection
+    model_type: str = "standard"  # standard, residual, mlp_complex, transformer
+    
+    # Standard/Residual architecture
     hidden_layers: Tuple[int, ...] = (256, 128, 64)
     dropout_rate: float = 0.2
     use_batch_norm: bool = True
     activation: str = "relu"
     
+    # MLP Complex architecture (for mlp_complex type)
+    hidden: Tuple[int, ...] = (256, 128, 64)  # Base units for complex MLP
+    dropout: float = 0.2
+    
+    # Transformer architecture (for transformer type) 
+    conv_filters: int = 64
+    conv_kernel: int = 3
+    mha_heads: int = 8
+    mha_key_dim: int = 64
+    ffn_units: int = 256
+    
     # Training
     learning_rate: float = 1e-3
+    lr: float = 1e-3  # Alternative naming for consistency
     batch_size: int = 64
     epochs: int = 100
     
@@ -44,10 +73,15 @@ class ModelConfig:
     
     # Random seed
     seed: int = 42
+    
+    def __post_init__(self):
+        """Ensure lr and learning_rate are consistent."""
+        if self.lr != self.learning_rate:
+            self.lr = self.learning_rate
 
 
 class EnergyPricePredictor:
-    """Neural network model for energy price prediction."""
+    """Neural network model for energy price prediction with multiple architectures."""
     
     def __init__(self, config: ModelConfig):
         self.config = config
@@ -63,22 +97,42 @@ class EnergyPricePredictor:
         np.random.seed(self.config.seed)
         tf.random.set_seed(self.config.seed)
     
-    def build_model(self, input_dim: int, output_dim: int = 1) -> Model:
+    def build_model(self, input_dim: int, output_dim: int = 1, input_steps: int = None) -> Model:
         """
-        Build the neural network architecture.
+        Build the neural network architecture based on model_type.
         
         Args:
-            input_dim: Number of input features
-            output_dim: Number of output neurons (1 for main target, 6 for multi-output with leaky cols)
+            input_dim: Number of input features (or n_features for transformer)
+            output_dim: Number of output neurons
+            input_steps: Sequence length for transformer models
             
         Returns:
             Compiled Keras model
         """
         self.feature_dim = input_dim
         
-        model = Sequential([
-            Input(shape=(input_dim,), name="input_features")
-        ])
+        if self.config.model_type == ModelType.STANDARD.value:
+            model = self._build_standard_model(input_dim, output_dim)
+        elif self.config.model_type == ModelType.RESIDUAL.value:
+            model = self._build_residual_model(input_dim, output_dim)
+        elif self.config.model_type == ModelType.MLP_COMPLEX.value:
+            model = self._build_mlp_complex(input_dim, output_dim)
+        elif self.config.model_type == ModelType.TRANSFORMER.value:
+            if input_steps is None:
+                raise ValueError("input_steps must be provided for transformer models")
+            model = self._build_conv_attn_model(input_steps, input_dim, output_dim)
+        else:
+            raise ValueError(f"Unknown model_type: {self.config.model_type}")
+        
+        self.model = model
+        print(f"Built {self.config.model_type} model:")
+        model.summary()
+        
+        return model
+    
+    def _build_standard_model(self, input_dim: int, output_dim: int) -> Model:
+        """Build the standard feed-forward neural network."""
+        model = Sequential([Input(shape=(input_dim,), name="input_features")])
         
         # Add hidden layers
         for i, units in enumerate(self.config.hidden_layers):
@@ -97,7 +151,7 @@ class EnergyPricePredictor:
                     name=f"dropout_{i+1}"
                 ))
         
-        # Output layer - multiple neurons if using leaky columns
+        # Output layer
         model.add(Dense(output_dim, activation="linear", name="output"))
         
         # Compile model
@@ -107,10 +161,135 @@ class EnergyPricePredictor:
             metrics=["mae"]
         )
         
-        self.model = model
-        print(f"Built model with {input_dim} input features and {output_dim} output neurons:")
-        model.summary()
+        return model
+    
+    def _build_mlp_complex(self, input_dim: int, output_dim: int) -> Model:
+        """Build complex MLP with expanded layers per block."""
+        m = Sequential([Input(shape=(input_dim,))])
         
+        for units in self.config.hidden:
+            # First sub-layer
+            m.add(Dense(units, activation="relu"))
+            m.add(BatchNormalization())
+            m.add(Dropout(self.config.dropout))
+            
+            # Second sub-layer (compressed)
+            m.add(Dense(int(units / 2), activation="relu"))
+            m.add(BatchNormalization())
+            m.add(Dropout(self.config.dropout))
+            
+            # Third sub-layer (back to original size)
+            m.add(Dense(units, activation="relu"))
+            m.add(BatchNormalization())
+            m.add(Dropout(self.config.dropout))
+        
+        m.add(Dense(output_dim, activation="linear"))
+        m.compile(
+            optimizer=Adam(self.config.lr), 
+            loss="mse", 
+            metrics=["mae"]
+        )
+        return m
+    
+    def _build_residual_model(self, input_dim: int, output_dim: int) -> Model:
+        """Build a residual neural network."""
+        inputs = Input(shape=(input_dim,))
+        x = inputs
+        
+        # Initial dense layer to match residual block dimensions
+        if self.config.hidden_layers:
+            x = Dense(self.config.hidden_layers[0], activation="relu")(x)
+            x = BatchNormalization()(x)
+            
+            # Add residual blocks
+            for units in self.config.hidden_layers:
+                x = self._residual_block(x, units, self.config.dropout_rate)
+        
+        # Output layer
+        outputs = Dense(output_dim, activation="linear")(x)
+        
+        model = Model(inputs=inputs, outputs=outputs, name="ResidualPredictor")
+        model.compile(
+            optimizer=Adam(learning_rate=self.config.learning_rate),
+            loss="mse",
+            metrics=["mae"]
+        )
+        
+        return model
+    
+    def _residual_block(self, inputs, units: int, dropout_rate: float):
+        """Create a residual block."""
+        x = Dense(units, activation="relu")(inputs)
+        x = BatchNormalization()(x)
+        x = Dropout(dropout_rate)(x)
+        
+        x = Dense(units, activation="relu")(x)
+        x = BatchNormalization()(x)
+        
+        # Residual connection
+        if inputs.shape[-1] == units:
+            x = x + inputs
+        
+        x = Dropout(dropout_rate)(x)
+        return x
+    
+    def _transformer_block(self, x, training: bool = True):
+        """
+        Simple Transformer encoder block:
+        - Pre-norm LayerNormalization
+        - MultiHeadAttention (self-attention)
+        - Residual
+        - Feed-Forward network (Dense -> Dropout -> Dense) with residual
+        """
+        # Self-attention
+        attn_input = LayerNormalization(epsilon=1e-6)(x)
+        attn_out = MultiHeadAttention(
+            num_heads=self.config.mha_heads, 
+            key_dim=self.config.mha_key_dim
+        )(attn_input, attn_input)
+        attn_out = Dropout(self.config.dropout)(attn_out, training=training)
+        x = x + attn_out  # residual
+
+        # Feed-forward
+        ffn_input = LayerNormalization(epsilon=1e-6)(x)
+        ffn = Dense(self.config.ffn_units, activation="relu")(ffn_input)
+        ffn = Dropout(self.config.dropout)(ffn, training=training)
+        ffn = Dense(x.shape[-1], activation="linear")(ffn)
+        x = x + ffn  # residual
+        return x
+    
+    def _build_conv_attn_model(self, input_steps: int, n_features: int, output_dim: int) -> Model:
+        """
+        Conv1D → Transformer Encoder (MHA) → Dense(1)
+        """
+        inp = Input(shape=(input_steps, n_features))
+
+        # Feature mixing along time using Conv1D
+        x = Conv1D(
+            filters=self.config.conv_filters,
+            kernel_size=self.config.conv_kernel,
+            padding="same",
+            activation="relu"
+        )(inp)
+
+        # Self-attention blocks (captures long-range temporal dependencies)
+        x = self._transformer_block(x, training=True)
+        x = self._transformer_block(x, training=True)  
+        x = self._transformer_block(x, training=True)
+
+        # Flatten the output of the attention block
+        x = Flatten()(x)
+        x = Dropout(self.config.dropout)(x)
+        x = Dense(100, activation="relu")(x)
+        
+        out = Dense(output_dim, activation="linear")(x)
+
+        model = Model(inp, out)
+        model.compile(
+            optimizer=Adam(self.config.lr), 
+            loss="mse", 
+            metrics=["mae"]
+        )
         return model
     
     def create_callbacks(self, model_save_path: str) -> List:
@@ -149,7 +328,8 @@ class EnergyPricePredictor:
         train_data: Tuple[np.ndarray, np.ndarray],
         val_data: Tuple[np.ndarray, np.ndarray],
         model_save_path: str,
-        use_leaky: bool = False
+        use_leaky: bool = False,
+        input_steps: int = None
     ) -> Dict[str, Any]:
         """
         Train the neural network model.
@@ -159,6 +339,7 @@ class EnergyPricePredictor:
             val_data: Tuple of (X_val, y_val)
             model_save_path: Path to save the best model
             use_leaky: Whether using leaky columns (affects output dimension)
+            input_steps: Sequence length for transformer models
             
         Returns:
             Training history dictionary
@@ -169,15 +350,26 @@ class EnergyPricePredictor:
         # Determine output dimension
         output_dim = y_train.shape[1] if len(y_train.shape) > 1 else 1
         
+        # For transformer models, input_dim represents n_features
+        if self.config.model_type == ModelType.TRANSFORMER.value:
+            if len(X_train.shape) == 3:  # (samples, steps, features)
+                input_dim = X_train.shape[2]  # n_features
+                if input_steps is None:
+                    input_steps = X_train.shape[1]  # sequence length
+            else:
+                raise ValueError("Transformer models require 3D input (samples, steps, features)")
+        else:
+            input_dim = X_train.shape[1] if len(X_train.shape) == 2 else X_train.shape[-1]
+        
         # Build model if not already built
         if self.model is None:
-            self.build_model(X_train.shape[1], output_dim)
+            self.build_model(input_dim, output_dim, input_steps)
         
         # Create callbacks
         callbacks = self.create_callbacks(model_save_path)
         
         # Train model
-        print(f"Starting training with {X_train.shape[0]} training samples...")
+        print(f"Starting training {self.config.model_type} model with {X_train.shape[0]} training samples...")
         print(f"Output dimension: {output_dim} ({'multi-output with leaky cols' if output_dim > 1 else 'single target'})")
         
         self.history = self.model.fit(
@@ -291,13 +483,134 @@ class EnergyPricePredictor:
         return cls(config)
 
 
+def train_multiple_models(
+    train_data: Tuple[np.ndarray, np.ndarray],
+    val_data: Tuple[np.ndarray, np.ndarray],
+    test_data: Tuple[np.ndarray, np.ndarray],
+    base_config: ModelConfig,
+    artifacts_dir: str = "artifacts_nn",
+    model_types: List[str] = None,
+    input_steps: int = None,
+    data_3d: Optional[Tuple[
+        Tuple[np.ndarray, np.ndarray], 
+        Tuple[np.ndarray, np.ndarray], 
+        Tuple[np.ndarray, np.ndarray]
+    ]] = None
+) -> Dict[str, Tuple[EnergyPricePredictor, Dict[str, Any]]]:
+    """
+    Train multiple model architectures and compare their performance.
+    
+    Args:
+        train_data: Training data tuple (2D for standard/residual/mlp models)
+        val_data: Validation data tuple (2D)
+        test_data: Test data tuple (2D)
+        base_config: Base model configuration
+        artifacts_dir: Directory to save model artifacts
+        model_types: List of model types to train
+        input_steps: Sequence length for transformer models
+        data_3d: Optional 3D data tuple for transformer models
+        
+    Returns:
+        Dictionary mapping model_type to (trained_model, evaluation_results)
+    """
+    if model_types is None:
+        model_types = ["standard", "residual", "mlp_complex"]
+        # Only add transformer if we have 3D data
+        if data_3d is not None:
+            model_types.append("transformer")
+    
+    results = {}
+    
+    print(f"Training {len(model_types)} different model architectures...")
+    print(f"2D data shape: {train_data[0].shape}")
+    if data_3d is not None:
+        print(f"3D data shape: {data_3d[0][0].shape}")
+    
+    for model_type in model_types:
+        print(f"\n{'='*60}")
+        print(f"Training {model_type.upper()} model")
+        print(f"{'='*60}")
+        
+        # Create config for this model type
+        config = ModelConfig(**asdict(base_config))
+        config.model_type = model_type
+        
+        # Create model-specific artifacts directory
+        model_artifacts_dir = os.path.join(artifacts_dir, f"{model_type}_model")
+        os.makedirs(model_artifacts_dir, exist_ok=True)
+        
+        try:
+            # Use 3D data for transformer, 2D for others
+            if model_type == "transformer" and data_3d is not None:
+                predictor, eval_results = train_model_from_data(
+                    data_3d[0], data_3d[1], data_3d[2], 
+                    config, model_artifacts_dir, input_steps
+                )
+            else:
+                predictor, eval_results = train_model_from_data(
+                    train_data, val_data, test_data, 
+                    config, model_artifacts_dir, input_steps
+                )
+            
+            results[model_type] = (predictor, eval_results)
+        
+        except Exception as e:
+            print(f"Failed to train {model_type} model: {str(e)}")
+            continue
+    
+    results = {}
+    
+    print(f"Training {len(model_types)} different model architectures...")
+    
+    for model_type in model_types:
+        print(f"\n{'='*60}")
+        print(f"Training {model_type.upper()} model")
+        print(f"{'='*60}")
+        
+        # Create config for this model type
+        config = ModelConfig(**asdict(base_config))
+        config.model_type = model_type
+        
+        # Create model-specific artifacts directory
+        model_artifacts_dir = os.path.join(artifacts_dir, f"{model_type}_model")
+        os.makedirs(model_artifacts_dir, exist_ok=True)
+        
+        try:
+            # Train model
+            predictor, eval_results = train_model_from_data(
+                train_data, val_data, test_data, 
+                config, model_artifacts_dir, use_leaky, input_steps
+            )
+            
+            results[model_type] = (predictor, eval_results)
+            
+        except Exception as e:
+            print(f"Failed to train {model_type} model: {str(e)}")
+            continue
+    
+    # Print comparison
+    print(f"\n{'='*80}")
+    print("MODEL COMPARISON")
+    print(f"{'='*80}")
+    print(f"{'Model':15} {'RMSE':>8} {'MAE':>8} {'R²':>8} {'AIC':>10} {'Params':>8}")
+    print("-" * 80)
+    
+    for model_type, (predictor, eval_results) in results.items():
+        test_metrics = eval_results["test"]
+        print(f"{model_type:15} {test_metrics['RMSE']:8.3f} {test_metrics['MAE']:8.3f} "
+              f"{test_metrics['R2']:8.4f} {test_metrics['AIC']:10.1f} {test_metrics['n_params']:8d}")
+    
+    return results
+
+
 def train_model_from_data(
     train_data: Tuple[np.ndarray, np.ndarray],
     val_data: Tuple[np.ndarray, np.ndarray],
     test_data: Tuple[np.ndarray, np.ndarray],
     config: ModelConfig,
     artifacts_dir: str = "artifacts_nn",
-    use_leaky: bool = False
+    use_leaky: bool = False,
+    input_steps: int = None
 ) -> Tuple[EnergyPricePredictor, Dict[str, Any]]:
     """
     Complete model training pipeline.
@@ -309,6 +622,7 @@ def train_model_from_data(
         config: Model configuration
         artifacts_dir: Directory to save model artifacts
         use_leaky: Whether using leaky columns for multi-output
+        input_steps: Sequence length for transformer models
         
     Returns:
         Tuple of (trained_model, evaluation_results)
@@ -323,7 +637,7 @@ def train_model_from_data(
     config_path = os.path.join(artifacts_dir, "model_config.json")
     
     # Train model
-    history = predictor.train(train_data, val_data, model_path, use_leaky)
+    history = predictor.train(train_data, val_data, model_path, use_leaky, input_steps)
     
     # Save configuration
     predictor.save_config(config_path)
@@ -332,7 +646,7 @@ def train_model_from_data(
     results = predictor.evaluate(test_data, train_data, val_data)
     
     # Print results with AIC
-    print("\n=== Model Evaluation ===")
+    print(f"\n=== {config.model_type.upper()} Model Evaluation ===")
     for split_name, metrics in results.items():
         print(f"{split_name.upper():>5}  RMSE={metrics['RMSE']:.3f}  MAE={metrics['MAE']:.3f}  R²={metrics['R2']:.4f}  AIC={metrics['AIC']:.1f}")
     
@@ -365,61 +679,55 @@ def create_ensemble_predictions(
         raise ValueError(f"Unknown ensemble method: {method}")
 
 
-# Advanced model architectures
-class ResidualBlock(tf.keras.layers.Layer):
-    """Residual block for deeper networks."""
+# Example usage function
+def example_multi_model_training():
+    """Example of how to train multiple model types."""
     
-    def __init__(self, units: int, dropout_rate: float = 0.0, **kwargs):
-        super().__init__(**kwargs)
-        self.units = units
-        self.dropout_rate = dropout_rate
+    # Create sample configuration
+    config = ModelConfig(
+        # Standard architecture settings
+        hidden_layers=(256, 128, 64),
+        dropout_rate=0.2,
         
-        self.dense1 = Dense(units, activation="relu")
-        self.batch_norm1 = BatchNormalization()
-        self.dropout1 = Dropout(dropout_rate)
+        # Complex MLP settings  
+        hidden=(256, 128, 64),
+        dropout=0.2,
         
-        self.dense2 = Dense(units, activation="relu")
-        self.batch_norm2 = BatchNormalization()
-        self.dropout2 = Dropout(dropout_rate)
+        # Transformer settings
+        conv_filters=64,
+        conv_kernel=3,
+        mha_heads=8,
+        mha_key_dim=64,
+        ffn_units=256,
         
-    def call(self, inputs, training=None):
-        x = self.dense1(inputs)
-        x = self.batch_norm1(x, training=training)
-        x = self.dropout1(x, training=training)
+        # Training settings
+        learning_rate=1e-3,
+        batch_size=64,
+        epochs=100,
         
-        x = self.dense2(x)
-        x = self.batch_norm2(x, training=training)
-        
-        # Residual connection
-        if inputs.shape[-1] == self.units:
-            x = x + inputs
-        
-        x = self.dropout2(x, training=training)
-        return x
-
-
-def build_residual_model(input_dim: int, config: ModelConfig) -> Model:
-    """Build a residual neural network."""
-    inputs = Input(shape=(input_dim,))
-    x = inputs
-    
-    # Initial dense layer to match residual block dimensions
-    if config.hidden_layers:
-        x = Dense(config.hidden_layers[0], activation="relu")(x)
-        x = BatchNormalization()(x)
-        
-        # Add residual blocks
-        for units in config.hidden_layers:
-            x = ResidualBlock(units, config.dropout_rate)(x)
-    
-    # Output layer
-    outputs = Dense(1, activation="linear")(x)
-    
-    model = Model(inputs=inputs, outputs=outputs, name="ResidualPredictor")
-    model.compile(
-        optimizer=Adam(learning_rate=config.learning_rate),
-        loss="mse",
-        metrics=["mae"]
+        seed=42
     )
     
-    return model
+    # Example usage (you would replace with your actual data):
+    """
+    # For 2D data (standard, residual, mlp_complex)
+    results_2d = train_multiple_models(
+        train_data=(X_train, y_train),
+        val_data=(X_val, y_val), 
+        test_data=(X_test, y_test),
+        base_config=config,
+        model_types=["standard", "residual", "mlp_complex"]
+    )
+    
+    # For 3D sequential data (including transformer)
+    results_3d = train_multiple_models(
+        train_data=(X_train_3d, y_train),  # X_train_3d shape: (samples, timesteps, features)
+        val_data=(X_val_3d, y_val),
+        test_data=(X_test_3d, y_test), 
+        base_config=config,
+        model_types=["standard", "residual", "mlp_complex", "transformer"],
+        input_steps=X_train_3d.shape[1]  # sequence length
+    )
+    """
+    
+    return config

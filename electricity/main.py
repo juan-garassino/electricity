@@ -351,7 +351,6 @@ def run_quick_experiment(
     # Default configurations
     data_config = DataConfig(
         horizon=kwargs.get("horizon", 1),
-        use_leaky=kwargs.get("use_leaky", False),
         val_ratio=0.1,
         test_ratio=0.1
     )
@@ -369,7 +368,7 @@ def run_quick_experiment(
         preprocessed_csv = run_preprocessing_pipeline(
             input_csv, 
             os.path.join(output_dir, "preprocessing"),
-            keep_leaky=data_config.use_leaky
+            keep_leaky=kwargs.get("use_leaky", False)
         )
         
         # Step 2: Data preparation
@@ -384,7 +383,7 @@ def run_quick_experiment(
             data_dir, 
             model_config, 
             os.path.join(output_dir, "model"),
-            use_leaky=data_config.use_leaky
+            use_leaky=kwargs.get("use_leaky", False)
         )
         
         # Step 4: Evaluation

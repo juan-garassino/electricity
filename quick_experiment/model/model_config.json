@@ -1,4 +1,5 @@
 {
+  "model_type": "standard",
   "hidden_layers": [
     128,
     64,
@@ -7,7 +8,19 @@
   "dropout_rate": 0.2,
   "use_batch_norm": true,
   "activation": "relu",
+  "hidden": [
+    256,
+    128,
+    64
+  ],
+  "dropout": 0.2,
+  "conv_filters": 64,
+  "conv_kernel": 3,
+  "mha_heads": 8,
+  "mha_key_dim": 64,
+  "ffn_units": 256,
   "learning_rate": 0.001,
+  "lr": 0.001,
   "batch_size": 64,
   "epochs": 50,
   "early_stopping_patience": 15,
