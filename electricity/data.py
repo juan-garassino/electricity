@@ -68,10 +68,13 @@ class SupervisedDataset:
         Create supervised dataset with future targets.
         
         Args:
-            preprocessed_df: DataFrame from preprocessing pipeline
+            preprocessed_df: DataFrame from the preprocessing pipeline, shape
+                ``(n_rows, n_cols)``, indexed by date.
             
         Returns:
-            Tuple of (features_df, targets_array, target_names)
+            Tuple of (features_df, targets_array, target_names). ``features_df`` is
+            ``(n, n_features)``; ``targets_array`` is a ``(n, n_targets)`` array holding the
+            targets shifted by ``horizon`` rows (the last ``horizon`` rows are dropped).
         """
         df = preprocessed_df.copy()
         
@@ -183,12 +186,16 @@ class SupervisedDataset:
         Split data chronologically into train/val/test sets.
         
         Args:
-            X: Features (DataFrame or array)
-            y: Targets
+            X: Features, shape ``(n, n_features)`` (DataFrame or array)
+            y: Targets, shape ``(n, n_targets)``
             create_sequences: Whether to create 3D sequences for transformers
+                (only applied when ``config.sequence_length`` is set)
             
         Returns:
-            Tuple of ((X_train, y_train), (X_val, y_val), (X_test, y_test))
+            Tuple of ((X_train, y_train), (X_val, y_val), (X_test, y_test)). X parts are
+            ``(n_split, n_features)``, or ``(n_split, sequence_length, n_features)`` for
+            sequences. Splits are contiguous, in time order, sized by ``val_ratio`` /
+            ``test_ratio``.
         """
         if create_sequences and self.config.sequence_length is not None:
             # Create sequences first, then split
@@ -237,8 +244,14 @@ class SupervisedDataset:
         Scale features using StandardScaler fitted on training data.
         Handles both 2D (tabular) and 3D (sequence) data.
         
+        Args:
+            train_data: ``(X_train, y_train)``; X is 2D or 3D, used to fit the scaler.
+            val_data: ``(X_val, y_val)``.
+            test_data: ``(X_test, y_test)``.
+        
         Returns:
-            Tuple of scaled (X_train, y_train), (X_val, y_val), (X_test, y_test)
+            Tuple of scaled (X_train, y_train), (X_val, y_val), (X_test, y_test). Scaled X
+            keeps its input shape and has dtype float32; y is returned unscaled.
         """
         X_train, y_train = train_data
         X_val, y_val = val_data
@@ -349,7 +362,12 @@ class SupervisedDataset:
         test_data: Tuple[np.ndarray, np.ndarray],
         suffix: str = ""
     ):
-        """Save processed and split data to disk."""
+        """Save the splits as ``X_*.npy`` / ``y_*.npy`` in `output_dir`.
+
+        For an empty `suffix` or ``"2d"`` the scaler mean/scale (``scaler_mean.npy``,
+        ``scaler_scale.npy``) and ``feature_names.txt`` / ``target_names.txt`` are written
+        as well. A non-empty `suffix` is appended as ``_<suffix>`` to the split file names.
+        """
         os.makedirs(output_dir, exist_ok=True)
         
         X_train, y_train = train_data
@@ -387,7 +405,14 @@ class SupervisedDataset:
         data_dir: str,
         suffix: str = ""
     ) -> Tuple[Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray], Tuple[np.ndarray, np.ndarray]]:
-        """Load processed data from disk."""
+        """Load the splits written by `save_processed_data`.
+
+        Restores scaler parameters and feature/target names when `suffix` is empty or
+        ``"2d"``.
+
+        Returns:
+            ((X_train, y_train), (X_val, y_val), (X_test, y_test)) as NumPy arrays.
+        """
         suffix = f"_{suffix}" if suffix else ""
         
         X_train = np.load(os.path.join(data_dir, f"X_train{suffix}.npy"))

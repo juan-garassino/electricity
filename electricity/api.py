@@ -1,3 +1,12 @@
+"""FastAPI service that serves a saved Keras model.
+
+Endpoints:
+    GET /: welcome message.
+    POST /predict: upload a ``.npy`` / ``.npz`` array, receive the flattened predictions.
+
+The model is loaded once at import time from ``MODEL_PATH`` (environment variable,
+default ``rnn_model.keras`` next to this file).
+"""
 import os
 import io
 import numpy as np
@@ -17,10 +26,23 @@ app = FastAPI()
 
 @app.get("/")
 async def root():
+    """Return a static welcome message (health check)."""
     return {"message": "welcome to our app"}
 
 @app.post("/predict")
 async def predict(file: UploadFile = File(...)):
+    """Run the model on an uploaded NumPy array.
+
+    Args:
+        file: ``.npy`` file, or ``.npz`` file whose first array is used. The array must
+            have the input shape the loaded model expects, e.g.
+            ``(n_samples, n_features)`` or ``(n_samples, timesteps, n_features)``.
+            Pickled arrays are rejected (``allow_pickle=False``).
+
+    Returns:
+        ``{"input_shape": list[int], "prediction": list[float]}`` with predictions
+        flattened to 1D, or HTTP 400 with ``{"error": str}`` on any failure.
+    """
     try:
         contents = await file.read()
 

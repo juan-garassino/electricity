@@ -456,26 +456,34 @@ class EnergyPricePredictor:
         return results
     
     def predict(self, X: np.ndarray) -> np.ndarray:
-        """Make predictions on new data."""
+        """Predict with the trained model.
+
+        Args:
+            X: float array, shape ``(n_samples, n_features)``, or
+                ``(n_samples, timesteps, n_features)`` for the transformer.
+
+        Returns:
+            Flattened predictions, shape ``(n_samples * n_outputs,)``.
+        """
         if self.model is None:
             raise ValueError("Model must be trained before making predictions")
         
         return self.model.predict(X, verbose=0).ravel()
     
     def save_config(self, config_path: str):
-        """Save model configuration to JSON file."""
+        """Write the `ModelConfig` as JSON to `config_path`."""
         with open(config_path, "w") as f:
             json.dump(asdict(self.config), f, indent=2)
         print(f"Saved model configuration to: {config_path}")
     
     def load_model(self, model_path: str):
-        """Load a trained model from file."""
+        """Load a Keras model from `model_path` into ``self.model``."""
         self.model = tf.keras.models.load_model(model_path)
         print(f"Loaded model from: {model_path}")
     
     @classmethod
     def load_config(cls, config_path: str) -> 'EnergyPricePredictor':
-        """Load model configuration from JSON file."""
+        """Create an untrained predictor from a JSON file written by `save_config`."""
         with open(config_path, "r") as f:
             config_dict = json.load(f)
         
