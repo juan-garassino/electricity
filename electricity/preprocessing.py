@@ -1,4 +1,3 @@
-# preprocessing.py
 """
 Feature engineering pipeline for energy price forecasting.
 Creates enriched features from raw data including lags, rolling stats, and interactions.
@@ -24,9 +23,14 @@ class Sanitize(BaseEstimator, TransformerMixin):
         self.bin_map = {"Y": 1, "N": 0}
 
     def fit(self, X, y=None):
+        """No-op; present for scikit-learn compatibility. Returns ``self``."""
         return self
 
     def transform(self, X):
+        """Parse ``date_col`` to a sorted DatetimeIndex, drop leaky columns, map Y/N flags to 1/0.
+
+        Raises ``ValueError`` if ``date_col`` is missing. Rows with unparseable dates are dropped.
+        """
         df = X.copy()
         if self.date_col not in df.columns:
             raise ValueError(f"Missing '{self.date_col}' column.")
@@ -55,9 +59,14 @@ class CalendarFeatures(BaseEstimator, TransformerMixin):
         self.harmonics = harmonics
 
     def fit(self, X, y=None):
+        """No-op; present for scikit-learn compatibility. Returns ``self``."""
         return self
 
     def transform(self, X):
+        """Add calendar columns, month/week/day-of-year sin/cos pairs and yearly harmonics.
+
+        Requires a DatetimeIndex (as produced by ``Sanitize``).
+        """
         df = X.copy()
         dt = df.index
         
@@ -94,9 +103,15 @@ class RollingStats(BaseEstimator, TransformerMixin):
         self.windows = windows
 
     def fit(self, X, y=None):
+        """No-op; present for scikit-learn compatibility. Returns ``self``."""
         return self
 
     def transform(self, X):
+        """Add rolling mean/std per window, 7-day min/max, and the ``RRP_high_vol`` flag.
+
+        ``RRP_high_vol`` is 1 where RRP exceeds its 30-day rolling mean plus two rolling
+        standard deviations (the window includes the current day).
+        """
         df = X.copy()
         
         for col in self.cols:
@@ -121,9 +136,11 @@ class RollingStats(BaseEstimator, TransformerMixin):
 class Interactions(BaseEstimator, TransformerMixin):
     """Key interactions (demand x temps, calendar, weather)."""
     def fit(self, X, y=None):
+        """No-op; present for scikit-learn compatibility. Returns ``self``."""
         return self
 
     def transform(self, X):
+        """Add product features for each pair whose source columns are present."""
         df = X.copy()
         
         # Temperature interactions
@@ -151,12 +168,14 @@ class LagFeatures(BaseEstimator, TransformerMixin):
         self.lag_map = lag_map or {}
 
     def fit(self, X, y=None):
+        """Warn about ``lag_map`` columns missing from X. Returns ``self``."""
         missing = [c for c in self.lag_map if c not in X.columns]
         if missing:
             print(f"[LagFeatures] Warning: missing columns {missing} (will be skipped).")
         return self
 
     def transform(self, X):
+        """Append ``<col>_lag<k>`` columns (``shift(k)``); columns absent from X are skipped."""
         df = X.copy()
         blocks = []
         
@@ -180,9 +199,11 @@ class CleanFinite(BaseEstimator, TransformerMixin):
         self.fill_method = fill_method
 
     def fit(self, X, y=None):
+        """No-op; present for scikit-learn compatibility. Returns ``self``."""
         return self
 
     def transform(self, X):
+        """Replace +/-inf with NaN, then drop NaN rows or fill them per ``fill_method``."""
         df = X.replace([np.inf, -np.inf], np.nan)
         
         if not self.drop_na and self.fill_method:

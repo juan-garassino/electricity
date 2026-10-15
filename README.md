@@ -1,269 +1,164 @@
-# Energy Price Forecasting System
+# Energy Price Forecasting
 
-A complete machine learning pipeline for energy price forecasting with multiple neural network architectures and flexible target prediction capabilities.
+Day-ahead forecasting of the daily Regional Reference Price (`RRP`) of electricity with
+feature engineering and several neural network architectures (Keras / TensorFlow).
+The repository also contains a FastAPI prediction service and an alternative ensemble
+script built on the `darts` library.
 
-## Overview
+## What is in the repository
 
-This system provides an end-to-end solution for predicting energy prices using advanced feature engineering, multiple model architectures, and flexible target configurations. It's designed to handle both single-target and multi-target predictions with various neural network approaches.
+| Path | Content |
+| --- | --- |
+| `electricity/preprocessing.py` | scikit-learn transformer pipeline: calendar, rolling, interaction and lag features |
+| `electricity/data.py` | `DataConfig` and `SupervisedDataset`: future-target creation, chronological split, scaling, save/load |
+| `electricity/model.py` | `ModelConfig` and `EnergyPricePredictor` (four architectures), multi-model training, ensembling |
+| `electricity/helpers.py` | plots, metrics, error analysis, JSON/CSV reporting |
+| `electricity/main.py` | end-to-end pipeline (CLI and `run_quick_experiment`) |
+| `electricity/api.py` | FastAPI app serving a saved Keras model (`POST /predict`) |
+| `electricity/darts.py` | separate `darts`-based ensemble script (RF, linear, XGBoost, RNN/LSTM/GRU, Transformer, Prophet) |
+| `raw_data/complete_dataset.csv` | input data: 2106 daily rows, 2015-01-01 to 2020-10-06, 14 columns |
+| `quick_experiment/` | artifacts committed from one run of `run_quick_experiment` (data splits, model, two plots) |
+| `data/`, `results/` | intermediate snapshots and a saved model / array committed by the authors |
+| `notebooks/`, `boilerplates/` | exploratory notebooks and the scripts exported from them |
 
-## System Components
+`electricity/shapie_values.py` and `electricity/streamlit_app.py` are empty placeholders.
 
-### 1. Feature Engineering Pipeline (preprocessing.py)
+## Input data
 
-**Purpose**: Transforms raw energy data into enriched features suitable for machine learning
+`raw_data/complete_dataset.csv` has the columns `date, demand, RRP, demand_pos_RRP,
+RRP_positive, demand_neg_RRP, RRP_negative, frac_at_neg_RRP, min_temperature,
+max_temperature, solar_exposure, rainfall, school_day, holiday`.
+The columns `demand_pos_RRP`, `RRP_positive`, `demand_neg_RRP`, `RRP_negative` and
+`frac_at_neg_RRP` are derived from the same-day price and are treated as potentially
+leaky: they are dropped by default (`keep_leaky=False`).
+The repository does not state where the dataset comes from.
 
-**Key Features:**
-- **Data Sanitization**: Handles datetime conversion, sorts chronologically, manages binary flags
-- **Calendar Features**: Extracts temporal patterns including cyclical encodings and Fourier harmonics
-- **Rolling Statistics**: Creates moving averages, standard deviations, min/max values over multiple windows
-- **Feature Interactions**: Generates meaningful combinations like demand × temperature, calendar × weather
-- **Lag Features**: Creates historical lookback features with configurable lag periods
-- **Data Cleaning**: Handles infinite values and missing data with multiple strategies
+## Setup
 
-**Preprocessing Steps:**
-1. Sanitize data and establish datetime index
-2. Add comprehensive calendar features with cyclical encoding
-3. Calculate rolling statistics for key variables
-4. Create interaction terms between important features
-5. Generate lagged features for temporal dependencies
-6. Clean and finalize dataset
+The repository has no `requirements.txt` or `pyproject.toml` (the `Dockerfile` expects a
+`requirements.txt`). The code imports:
 
-**Configuration Options:**
-- Customizable lag periods for different variables
-- Flexible rolling window sizes
-- Optional Fourier harmonics for seasonal patterns
-- Choice to keep or exclude potentially leaky columns
-- Multiple missing data handling strategies
+- always: `numpy`, `pandas`, `scikit-learn`, `scipy`, `matplotlib`, `seaborn`, `tensorflow`
+- `electricity/api.py`: `fastapi`, `uvicorn`, `python-multipart` (for file upload)
+- `electricity/darts.py`: `darts`, `xgboost`
 
-### 2. Data Pipeline (data.py)
+`.python-version` pins Python 3.11. The quickstart below was run with Python 3.11 and
+TensorFlow 2.21 (CPU).
 
-**Purpose**: Creates supervised datasets with flexible target configurations and handles data splitting
+```bash
+python -m venv .venv && source .venv/bin/activate
+pip install tensorflow pandas scikit-learn scipy matplotlib seaborn
+```
 
-**Target Modes:**
-- **Single Target**: Predict just RRP (Regional Reference Price)
-- **All RRP**: Predict all RRP-related columns simultaneously
-- **Custom**: Specify exactly which columns to predict
+## Quickstart
 
-**Key Capabilities:**
-- **Multi-Target Support**: Handle single or multiple prediction targets
-- **Sequence Creation**: Generate 3D sequences for transformer models
-- **Dual Preparation**: Creates both 2D tabular and 3D sequential datasets
-- **Chronological Splitting**: Proper time series train/validation/test splits
-- **Feature Scaling**: StandardScaler fitted only on training data
-- **Data Persistence**: Save and load processed datasets
+The modules import each other without a package prefix, so run Python from inside the
+`electricity/` directory. This preprocesses the raw CSV, builds the supervised dataset and
+trains the standard network for 3 epochs on CPU (a smoke run, not a tuned model; it takes
+well under a minute on a laptop-class CPU):
 
-**Data Flow:**
-1. Load preprocessed data from CSV
-2. Create supervised dataset with future targets
-3. Generate sequences for transformer models (optional)
-4. Split data chronologically into train/val/test
-5. Scale features using training statistics
-6. Save processed data for model training
-
-**Configuration:**
-- Flexible target selection modes
-- Configurable prediction horizons
-- Adjustable train/validation/test ratios
-- Sequence length control for transformers
-- Feature exclusion options
-
-### 3. Neural Network Models (model.py)
-
-**Purpose**: Multiple neural network architectures for comprehensive model comparison
-
-**Available Architectures:**
-
-**Standard Network**
-- Traditional feed-forward architecture
-- Configurable hidden layers with batch normalization
-- Dropout regularization
-- Best for: Baseline comparisons, interpretable results
-
-**Residual Network**
-- Skip connections between layers
-- Handles vanishing gradient problems
-- Deeper network capabilities
-- Best for: Complex pattern recognition, deep learning benefits
-
-**MLP Complex**
-- Expanded multi-layer perceptron
-- Three sub-layers per block (expand → compress → expand)
-- Heavy regularization
-- Best for: Rich feature interactions, robust predictions
-
-**Transformer**
-- Conv1D feature mixing
-- Multi-head attention mechanisms
-- Handles sequential dependencies
-- Best for: Long-range temporal patterns, sequence modeling
-
-**Model Features:**
-- **Multi-Target Prediction**: All architectures support multiple outputs
-- **Automatic Comparison**: Side-by-side performance evaluation
-- **Smart Data Routing**: 2D data for standard models, 3D for transformers
-- **Comprehensive Metrics**: RMSE, MAE, R², AIC, parameter counts
-- **Model Persistence**: Save/load trained models with configurations
-
-**Training Features:**
-- Early stopping with patience
-- Learning rate reduction on plateau
-- Model checkpointing for best weights
-- Configurable batch sizes and epochs
-- Reproducible results with seed control
-
-## Usage Workflow
-
-### Step 1: Preprocess Raw Data
 ```python
+# run from electricity/
 from preprocessing import preprocess_data
-
-# Transform raw data into ML-ready features
-processed_df = preprocess_data(
-    input_csv="raw_energy_data.csv",
-    output_csv="preprocessed_data.csv",
-    keep_leaky=False  # Exclude potentially leaky columns
-)
-```
-
-### Step 2: Prepare Training Data
-```python
 from data import DataConfig, SupervisedDataset
+from model import ModelConfig, train_model_from_data
 
-# Configure target prediction
-config = DataConfig(
-    target_mode="single",  # or "all_rrp" or "custom"
-    target_col="RRP",
-    horizon=1,  # Predict 1 step ahead
-    sequence_length=24  # For transformer models
-)
+preprocess_data("../raw_data/complete_dataset.csv", "out/preprocessed.csv")
 
-# Prepare datasets
-dataset = SupervisedDataset(config)
-data_2d, data_3d = dataset.prepare_for_multiple_models("preprocessed_data.csv")
+train, val, test = SupervisedDataset(DataConfig(horizon=1)).prepare_data_from_csv(
+    "out/preprocessed.csv"
+)  # each is (X, y); X is float32 (n_samples, 60), y is (n_samples, 1)
+
+model, results = train_model_from_data(train, val, test, ModelConfig(epochs=3), "out/model")
+print(results["test"])  # dict with RMSE, MAE, R2, AIC, MSE, n_params
 ```
 
-### Step 3: Train Multiple Models
-```python
-from model import ModelConfig, train_multiple_models
+Outputs: `out/preprocessed.csv`, `out/model/best_model.keras`, `out/model/model_config.json`.
 
-# Configure model training
-model_config = ModelConfig(
-    hidden_layers=(256, 128, 64),
-    learning_rate=1e-3,
-    epochs=100,
-    dropout_rate=0.2
-)
+## Pipeline
 
-# Train all architectures
-results = train_multiple_models(
-    train_data=data_2d[0],
-    val_data=data_2d[1], 
-    test_data=data_2d[2],
-    base_config=model_config,
-    data_3d=data_3d,  # For transformer
-    model_types=["standard", "residual", "mlp_complex", "transformer"]
-)
+1. **Preprocessing** (`preprocess_data`, `build_preprocessing_pipeline`): parse and sort by
+   date, drop leaky columns, map `school_day` / `holiday` from `Y`/`N` to 1/0, add calendar
+   features (year, month, week, day of week, ... with sin/cos encodings and yearly Fourier
+   harmonics), rolling mean/std (windows 7 and 30) plus 7-day min/max for `RRP` and
+   `demand`, an `RRP_high_vol` flag, interaction terms, and lags
+   (default: `RRP` and `demand` at 1, 2, 7, 30 days; weather variables at 1 and 7), then
+   drop rows with NaN. On the raw file this gives 2065 rows x 61 columns.
+2. **Dataset** (`SupervisedDataset`): shift the target by `horizon` days, split
+   chronologically (default 80/10/10), fit a `StandardScaler` on the training split only.
+   `target_mode` is `"single"` (`RRP`), `"all_rrp"` (five RRP-related columns, which
+   requires `keep_leaky=True` in preprocessing) or `"custom"`. With `sequence_length` set,
+   `prepare_for_multiple_models` also returns 3D sequences for the transformer.
+3. **Models** (`EnergyPricePredictor`, `ModelConfig.model_type`):
+   - `standard`: feed-forward layers with optional batch norm and dropout
+   - `residual`: feed-forward network with skip connections
+   - `mlp_complex`: per block three dense layers (units, units/2, units), each with batch norm and dropout
+   - `transformer`: Conv1D plus multi-head attention on 3D input
+4. **Training / evaluation**: Adam, early stopping, learning-rate reduction on plateau,
+   best-weights checkpoint, fixed seed (`seed=42`). Metrics per split: RMSE, MAE, R2, MSE,
+   AIC (`n*log(MSE) + 2k`, `k` = parameter count) and parameter count.
+   `train_multiple_models` trains several architectures and returns them keyed by type.
+
+Full pipeline from the command line (writes to `--output_dir`, default `artifacts/`):
+
+```bash
+cd electricity
+python main.py --input_csv ../raw_data/complete_dataset.csv --epochs 50
 ```
 
-### Step 4: Model Comparison
-The system automatically provides comprehensive model comparison:
-- Performance metrics across all architectures
-- Training/validation/test scores
-- Model complexity (parameter counts)
-- AIC scores for model selection
+Run with no arguments, `main.py` runs `run_quick_experiment()` with paths relative to the
+current directory (`raw_data/complete_dataset.csv`, output in `quick_experiment/`).
 
-## Configuration Options
+Known issues in the current code are listed under [Known limitations](#known-limitations).
 
-### Preprocessing Configuration
-- **Lag Periods**: Customize lookback windows for each variable
-- **Rolling Windows**: Set statistical calculation periods
-- **Calendar Features**: Enable/disable Fourier harmonics
-- **Interactions**: Control feature combination generation
-- **Missing Data**: Choose handling strategy
+## Results
 
-### Data Pipeline Configuration
-- **Target Selection**: Single, multiple, or custom targets
-- **Prediction Horizon**: How far ahead to predict
-- **Data Splits**: Train/validation/test ratios
-- **Sequences**: Length for transformer models
-- **Scaling**: Feature normalization options
+No evaluation metrics are stored in the repository. What is committed:
 
-### Model Configuration
-- **Architecture**: Choose from 4 different network types
-- **Layer Sizes**: Customize hidden layer dimensions
-- **Regularization**: Dropout rates and batch normalization
-- **Training**: Learning rates, epochs, early stopping
-- **Optimization**: Adam optimizer with learning rate scheduling
+- `quick_experiment/evaluation/training_history.png` and `test_predictions.png`: plots
+  from one run of the quick experiment.
+- `quick_experiment/model/model_config.json`: the configuration of that run
+  (`standard` network, hidden layers 128/64/32, 50 epochs, seed 42).
+- `quick_experiment/data/`: the scaled splits of that run: `X_train` (1651, 60),
+  `X_val` (206, 60), `X_test` (207, 60), target `RRP_t+1`.
 
-## Output and Results
+Rerun the quickstart or `run_quick_experiment()` to get metrics for your own run.
 
-### Model Artifacts
-- Trained model weights (best_model.keras)
-- Model configurations (model_config.json)
-- Training histories
-- Feature scaling parameters
+## API service
 
-### Performance Metrics
-- **RMSE**: Root Mean Square Error
-- **MAE**: Mean Absolute Error
-- **R²**: Coefficient of Determination
-- **AIC**: Akaike Information Criterion
-- **Parameter Count**: Model complexity measure
+`electricity/api.py` loads a Keras model at import time (`MODEL_PATH` environment
+variable, default `electricity/rnn_model.keras`) and exposes:
 
-### Data Artifacts
-- Processed training/validation/test splits
-- Feature names and scaling parameters
-- Target column specifications
-- Both 2D and 3D data formats
+- `GET /`: welcome message
+- `POST /predict`: multipart upload of a `.npy` (or `.npz`, first array) file; returns
+  `input_shape` and a flat `prediction` list. Errors return HTTP 400.
 
-## System Advantages
+A saved model is committed at `results/rnn_model.keras` with a sample input
+`results/my_x.npy` (float32, shape (782, 60, 14)). The default path above does not exist in
+the repository, so set `MODEL_PATH` explicitly:
 
-### Flexibility
-- Multiple target prediction modes
-- Four different neural network architectures
-- Configurable feature engineering pipeline
-- Adaptable to different energy market contexts
+```bash
+pip install fastapi uvicorn python-multipart
+MODEL_PATH=results/rnn_model.keras uvicorn electricity.api:app --port 8080
+```
 
-### Robustness
-- Proper time series validation
-- Comprehensive feature engineering
-- Multiple regularization techniques
-- Automatic model comparison
+The `Dockerfile` builds an image that runs this app with `uvicorn`.
 
-### Scalability
-- Efficient data processing
-- Parallel model training capability
-- Memory-efficient sequence handling
-- Extensible architecture design
+## Known limitations
 
-### Reliability
-- Reproducible results with seed control
-- Comprehensive error handling
-- Data validation at each step
-- Model persistence and recovery
+Found during a code review; these are documented rather than changed:
 
-## Best Practices
-
-### Data Preparation
-- Ensure chronological ordering of time series data
-- Validate date column format and completeness
-- Check for data gaps or irregularities
-- Consider domain-specific feature requirements
-
-### Model Selection
-- Start with standard architecture for baseline
-- Use transformer models for strong seasonal patterns
-- Apply residual networks for complex relationships
-- Try MLP complex for rich feature interactions
-
-### Validation Strategy
-- Maintain strict chronological splits
-- Use validation set for hyperparameter tuning
-- Reserve test set for final model evaluation
-- Consider walk-forward validation for production
-
-### Performance Monitoring
-- Track both training and validation metrics
-- Monitor for overfitting with early stopping
-- Compare AIC scores for model selection
-- Validate predictions on held-out periods
+- `main.py` `main()` passes `use_leaky` to `DataConfig`, which has no such field, so the
+  command-line path raises `TypeError` before training.
+- `run_quick_experiment()` stops in `plot_residuals` (`x and y must be the same size`):
+  `y_test` has shape `(n, 1)` while `EnergyPricePredictor.predict` returns a flattened
+  `(n,)` array, so `y_true - y_pred` broadcasts to `(n, n)`. Training, evaluation metrics
+  and the first two plots complete before this point.
+- `calculate_detailed_metrics` in `helpers.py` calls `stats.skew` / `stats.kurtosis`
+  without importing `scipy.stats`, so it raises `NameError`.
+- `electricity/darts.py` shares its name with the `darts` package; run as a script from
+  its own directory it imports itself instead of the library. It also reads
+  `complete_dataset.csv` from the working directory by default.
+- The `Makefile` targets reference `complete_dataset.csv` / `data.csv` paths that do not
+  match the repository layout.
+- No automated tests are included.

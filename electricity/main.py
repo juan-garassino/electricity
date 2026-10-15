@@ -1,4 +1,3 @@
-# main.py
 """
 Main script for end-to-end energy price forecasting pipeline.
 Orchestrates preprocessing, data preparation, model training, and evaluation.
@@ -8,9 +7,8 @@ import os
 import argparse
 from typing import Dict, Any
 
-# Local imports
-from preprocessing import preprocess_data, build_preprocessing_pipeline
-from data import SupervisedDataset, DataConfig, create_supervised_dataset
+from preprocessing import preprocess_data
+from data import SupervisedDataset, DataConfig
 from model import EnergyPricePredictor, ModelConfig, train_model_from_data
 from helpers import (
     plot_training_history, plot_predictions, plot_residuals,
@@ -23,7 +21,7 @@ def run_preprocessing_pipeline(
     input_csv: str,
     output_dir: str = "artifacts_preprocessing",
     keep_leaky: bool = False,
-    **preprocessing_kwargs
+    **preprocessing_kwargs: Any
 ) -> str:
     """
     Run the preprocessing pipeline.
@@ -149,7 +147,7 @@ def run_evaluation_and_visualization(
     data_dir: str,
     results: Dict[str, Any],
     output_dir: str = "artifacts_evaluation"
-):
+) -> None:
     """
     Run comprehensive evaluation and create visualizations.
     
@@ -226,7 +224,7 @@ def run_evaluation_and_visualization(
     print("✅ Evaluation completed successfully!")
 
 
-def main():
+def main() -> None:
     """Main pipeline execution."""
     parser = argparse.ArgumentParser(description="Energy Price Forecasting Pipeline")
     
@@ -336,8 +334,8 @@ def main():
 def run_quick_experiment(
     input_csv: str = "raw_data/complete_dataset.csv",
     output_dir: str = "quick_experiment",
-    **kwargs
-):
+    **kwargs: Any
+) -> None:
     """
     Run a quick experiment with default parameters.
     

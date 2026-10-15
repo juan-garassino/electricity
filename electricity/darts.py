@@ -11,7 +11,7 @@ import os, json, warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional
+from typing import List
 
 from darts import TimeSeries
 from darts.metrics import mae, rmse, r2_score
@@ -65,6 +65,7 @@ def _savefig(path: str):
     print(f"Saved plot → {path}")
 
 def plot_like_notebook(train, test, pred, title, out_dir, fname):
+    """Plot train, true test and forecast `TimeSeries` on one axis and save to out_dir/fname."""
     _ensure_dir(out_dir)
     plt.figure(figsize=(12,5))
     train.plot(label="Train", lw=1.2, color=PALETTE["train"])
@@ -74,6 +75,7 @@ def plot_like_notebook(train, test, pred, title, out_dir, fname):
     _savefig(os.path.join(out_dir, fname))
 
 def plot_true_vs_pred_subplots(test, pred, title_top, title_bottom, out_dir, fname):
+    """Save a two-row figure: true test series on top, forecast below (shared x axis)."""
     _ensure_dir(out_dir)
     fig, axes = plt.subplots(2, 1, figsize=(12,7), sharex=True)
     axes[0].plot(test.time_index, test.values().ravel(), label="Test (True)", lw=1.7, color=PALETTE["test"])
@@ -83,6 +85,7 @@ def plot_true_vs_pred_subplots(test, pred, title_top, title_bottom, out_dir, fna
     _savefig(os.path.join(out_dir, fname))
 
 def plot_zoom_last(series, test, pred, pre_days, title, out_dir, fname):
+    """Plot the test window plus `pre_days` days of preceding history, with the forecast overlaid."""
     _ensure_dir(out_dir)
     full_idx = series.time_index
     start_pos = max(0, full_idx.get_loc(test.start_time()) - pre_days)
@@ -95,6 +98,7 @@ def plot_zoom_last(series, test, pred, pre_days, title, out_dir, fname):
     _savefig(os.path.join(out_dir, fname))
 
 def plot_parity(y_true_ts, y_pred_ts, out_dir, fname, title):
+    """Save a true-vs-predicted scatter with the y = x reference line."""
     _ensure_dir(out_dir)
     y, yhat = y_true_ts.values().ravel(), y_pred_ts.values().ravel()
     mn, mx = float(min(y.min(), yhat.min())), float(max(y.max(), yhat.max()))
@@ -105,6 +109,7 @@ def plot_parity(y_true_ts, y_pred_ts, out_dir, fname, title):
     _savefig(os.path.join(out_dir, fname))
 
 def plot_residuals(y_true_ts, y_pred_ts, out_dir, fname, title):
+    """Save the residual series (prediction minus truth) over time."""
     _ensure_dir(out_dir)
     resid = y_pred_ts.values().ravel() - y_true_ts.values().ravel()
     plt.figure(figsize=(12,3.6))
@@ -114,6 +119,7 @@ def plot_residuals(y_true_ts, y_pred_ts, out_dir, fname, title):
     _savefig(os.path.join(out_dir, fname))
 
 def plot_rolling_mae(y_true_ts, y_pred_ts, window, out_dir, fname, title):
+    """Save the rolling mean absolute error over `window` days."""
     _ensure_dir(out_dir)
     y = pd.Series(y_true_ts.values().ravel(), index=y_true_ts.time_index)
     yhat = pd.Series(y_pred_ts.values().ravel(), index=y_pred_ts.time_index)
@@ -124,6 +130,12 @@ def plot_rolling_mae(y_true_ts, y_pred_ts, window, out_dir, fname, title):
 
 def plot_feature_importance_if_any(model_name, model_obj, feature_names, out_dir, fname, title,
                                    lags_target=None, lags_fut=None, cov_cols=None):
+    """Save a bar chart of the top-30 feature importances of a fitted darts SKLearnModel.
+
+    Uses `feature_importances_` (trees) or `abs(coef_)` (linear); returns without plotting
+    if the wrapped estimator has neither. When `feature_names` is None, names are built
+    from `lags_target`, `lags_fut` and `cov_cols`; missing names fall back to `feat_<i>`.
+    """
     est = getattr(model_obj, "model", None)
     if est is None: return
     if hasattr(est, "feature_importances_"):
@@ -164,8 +176,19 @@ def plot_feature_importance_if_any(model_name, model_obj, feature_names, out_dir
 # Model Factory
 # --------------------------
 class ModelFactory:
+    """Builds untrained darts models with the hyperparameters fixed in this module."""
+
     @staticmethod
     def create_model(model_name: str):
+        """Return a new darts model.
+
+        Args:
+            model_name: One of ``rf``, ``lin``, ``xgb``, ``rnn``, ``lstm``, ``gru``,
+                ``transformer``, ``prophet``.
+
+        Raises:
+            ValueError: If `model_name` is not recognised.
+        """
         if model_name == "rf":
             return SKLearnModel(
                 model=RandomForestRegressor(n_estimators=400, random_state=RANDOM_SEED, n_jobs=-1),
@@ -218,11 +241,13 @@ class ModelFactory:
 # Metrics / Tables
 # --------------------------
 def compute_aic(y_true: np.ndarray, y_pred: np.ndarray, k: int) -> float:
+    """Gaussian AIC, ``2k + n*log(RSS/n)``, over flattened 1D inputs of equal length n."""
     y_true = np.asarray(y_true).ravel(); y_pred = np.asarray(y_pred).ravel()
     n = len(y_true); rss = np.sum((y_true - y_pred) ** 2)
     sigma2 = max(rss / max(n, 1), 1e-12); return 2 * k + n * np.log(sigma2)
 
 def add_metrics(metrics: dict, name: str, y_true_ts: TimeSeries, y_pred_ts: TimeSeries, k: int):
+    """Store MAE, RMSE, R2 and AIC (with `k` parameters) of one forecast in `metrics[name]`."""
     metrics[name] = {
         "MAE": float(mae(y_true_ts, y_pred_ts)),
         "RMSE": float(rmse(y_true_ts, y_pred_ts)),
@@ -231,6 +256,10 @@ def add_metrics(metrics: dict, name: str, y_true_ts: TimeSeries, y_pred_ts: Time
     }
 
 def save_tables_and_base_overlays(results_dir, train, val, test, preds, blend_weights, model_names):
+    """Write ``predictions_vs_truth.csv`` and ``forecast_comparison.png`` to `results_dir`.
+
+    `train` and `val` are unused. `preds` maps model name to a forecast `TimeSeries`.
+    """
     os.makedirs(results_dir, exist_ok=True)
     out_df = pd.DataFrame({"date": test.time_index, "y_true": test.values().ravel()})
     for name, ts in preds.items():
@@ -373,6 +402,7 @@ def split_data(series, past_cov_ext, future_cov):
 # Fit / Predict per model type
 # --------------------------
 def fit_model(model, model_name, ds):
+    """Fit `model` on ``ds['train']`` with the covariates its family needs; return it."""
     print(f"Training {model_name.upper()}...")
     if model_name == "transformer":
         model.fit(ds['train'], past_covariates=ds['past_train'])
@@ -386,6 +416,19 @@ def fit_model(model, model_name, ds):
     return model
 
 def predict_model(model, model_name, ds, horizon, phase='test'):
+    """Forecast `horizon` steps with a fitted model.
+
+    Args:
+        model: Fitted darts model.
+        model_name: Key from `ModelFactory`; selects which covariates are passed.
+        ds: Dict returned by `split_data`.
+        horizon: Number of daily steps to forecast.
+        phase: ``'val'`` forecasts from the end of train; anything else forecasts from the
+            end of train + val.
+
+    Returns:
+        Forecast `TimeSeries` of length `horizon`.
+    """
     if phase == 'val':
         base_series = ds['train']
         fut_cov     = ds['fut_val']
@@ -411,6 +454,25 @@ def train_ensemble(models_to_train: List[str],
                    csv_path: str = CSV_PATH,
                    results_dir: str = RESULTS_DIR,
                    enable_blending: bool = True):
+    """Train the requested models, optionally blend them, then write metrics and plots.
+
+    Sets the module-level `CSV_PATH` / `RESULTS_DIR`. Blend weights are the coefficients of an
+    intercept-free linear regression on the validation forecasts, clipped at 0 and
+    normalised to sum to 1 (equal weights if all are 0); ``blend_eq`` is the plain average.
+
+    Args:
+        models_to_train: Names from ``rf, lin, xgb, rnn, lstm, gru, transformer, prophet``.
+        csv_path: Raw CSV with the columns of ``raw_data/complete_dataset.csv``.
+        results_dir: Output directory for tables, plots and ``metrics.json``.
+        enable_blending: Compute ``blend`` and ``blend_eq`` when more than one model is given.
+
+    Returns:
+        Dict with ``models``, ``predictions`` (test-window forecasts), ``metrics`` and
+        ``weights`` (None when no blending was done).
+
+    Raises:
+        ValueError: If a model name is not available.
+    """
 
     global CSV_PATH, RESULTS_DIR
     CSV_PATH, RESULTS_DIR = csv_path, results_dir
