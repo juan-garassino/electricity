@@ -150,9 +150,10 @@ Found during a code review; these are documented rather than changed:
 
 - `main.py` `main()` passes `use_leaky` to `DataConfig`, which has no such field, so the
   command-line path raises `TypeError` before training.
-- `plot_residuals` in `helpers.py` fails for a single-target `(n, 1)` prediction array
-  (`x and y must be the same size`), which stops `run_quick_experiment()` after the first
-  two plots have been written.
+- `run_quick_experiment()` stops in `plot_residuals` (`x and y must be the same size`):
+  `y_test` has shape `(n, 1)` while `EnergyPricePredictor.predict` returns a flattened
+  `(n,)` array, so `y_true - y_pred` broadcasts to `(n, n)`. Training, evaluation metrics
+  and the first two plots complete before this point.
 - `calculate_detailed_metrics` in `helpers.py` calls `stats.skew` / `stats.kurtosis`
   without importing `scipy.stats`, so it raises `NameError`.
 - `electricity/darts.py` shares its name with the `darts` package; run as a script from
