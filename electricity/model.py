@@ -1,4 +1,3 @@
-# model.py
 """
 Neural network model definition and training utilities for energy price forecasting.
 Enhanced with multiple architectures: MLP, ResNet, and Transformer-based models.

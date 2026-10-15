@@ -1,4 +1,3 @@
-# preprocessing.py
 """
 Feature engineering pipeline for energy price forecasting.
 Creates enriched features from raw data including lags, rolling stats, and interactions.

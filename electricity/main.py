@@ -1,4 +1,3 @@
-# main.py
 """
 Main script for end-to-end energy price forecasting pipeline.
 Orchestrates preprocessing, data preparation, model training, and evaluation.
@@ -8,7 +7,6 @@ import os
 import argparse
 from typing import Dict, Any
 
-# Local imports
 from preprocessing import preprocess_data, build_preprocessing_pipeline
 from data import SupervisedDataset, DataConfig, create_supervised_dataset
 from model import EnergyPricePredictor, ModelConfig, train_model_from_data

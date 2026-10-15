@@ -1,4 +1,3 @@
-# data.py
 """
 Dataset creation and management for neural network training.
 Handles supervised dataset creation with future targets and data splitting.
