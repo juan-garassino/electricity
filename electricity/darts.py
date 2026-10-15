@@ -11,7 +11,7 @@ import os, json, warnings
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from typing import Dict, List, Optional
+from typing import List
 
 from darts import TimeSeries
 from darts.metrics import mae, rmse, r2_score

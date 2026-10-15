@@ -9,6 +9,7 @@ default ``rnn_model.keras`` next to this file).
 """
 import os
 import io
+from typing import Any
 import numpy as np
 import tensorflow as tf
 from fastapi import FastAPI, UploadFile, File
@@ -25,12 +26,12 @@ model = tf.keras.models.load_model(MODEL_PATH)
 app = FastAPI()
 
 @app.get("/")
-async def root():
+async def root() -> dict:
     """Return a static welcome message (health check)."""
     return {"message": "welcome to our app"}
 
 @app.post("/predict")
-async def predict(file: UploadFile = File(...)):
+async def predict(file: UploadFile = File(...)) -> Any:
     """Run the model on an uploaded NumPy array.
 
     Args:

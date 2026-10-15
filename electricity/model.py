@@ -9,7 +9,7 @@ import json
 import math
 import numpy as np
 from dataclasses import dataclass, asdict
-from typing import Tuple, Dict, Any, Optional, List, Literal
+from typing import Tuple, Dict, Any, Optional, List
 from enum import Enum
 
 import tensorflow as tf
@@ -96,7 +96,7 @@ class EnergyPricePredictor:
         np.random.seed(self.config.seed)
         tf.random.set_seed(self.config.seed)
     
-    def build_model(self, input_dim: int, output_dim: int = 1, input_steps: int = None) -> Model:
+    def build_model(self, input_dim: int, output_dim: int = 1, input_steps: Optional[int] = None) -> Model:
         """
         Build the neural network architecture based on model_type.
         
@@ -328,7 +328,7 @@ class EnergyPricePredictor:
         val_data: Tuple[np.ndarray, np.ndarray],
         model_save_path: str,
         use_leaky: bool = False,
-        input_steps: int = None
+        input_steps: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Train the neural network model.
@@ -496,8 +496,8 @@ def train_multiple_models(
     test_data: Tuple[np.ndarray, np.ndarray],
     base_config: ModelConfig,
     artifacts_dir: str = "artifacts_nn",
-    model_types: List[str] = None,
-    input_steps: int = None,
+    model_types: Optional[List[str]] = None,
+    input_steps: Optional[int] = None,
     data_3d: Optional[Tuple[
         Tuple[np.ndarray, np.ndarray], 
         Tuple[np.ndarray, np.ndarray], 
@@ -617,7 +617,7 @@ def train_model_from_data(
     config: ModelConfig,
     artifacts_dir: str = "artifacts_nn",
     use_leaky: bool = False,
-    input_steps: int = None
+    input_steps: Optional[int] = None
 ) -> Tuple[EnergyPricePredictor, Dict[str, Any]]:
     """
     Complete model training pipeline.

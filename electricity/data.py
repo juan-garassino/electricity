@@ -127,7 +127,7 @@ class SupervisedDataset:
         self.feature_names = X_clean.columns.tolist()
         self.target_names = target_names
         
-        print(f"Created supervised dataset:")
+        print("Created supervised dataset:")
         print(f"  Features: {X_clean.shape}")
         print(f"  Targets: {y.shape} ({'multi-target' if y.shape[1] > 1 else 'single target'})")
         print(f"  Target columns: {target_names}")
@@ -169,7 +169,7 @@ class SupervisedDataset:
         X_sequences = np.array(X_sequences)
         y_sequences = np.array(y_sequences)
         
-        print(f"Created sequences:")
+        print("Created sequences:")
         print(f"  X_sequences: {X_sequences.shape}")
         print(f"  y_sequences: {y_sequences.shape}")
         
@@ -286,11 +286,11 @@ class SupervisedDataset:
         y_val = y_val.astype(np.float32) 
         y_test = y_test.astype(np.float32)
         
-        print(f"Feature scaling completed:")
+        print("Feature scaling completed:")
         print(f"  Data type: {'3D sequences' if is_3d else '2D tabular'}")
         print(f"  Scaler fitted on {X_train_scaled.shape[0]} training samples")
         print(f"  Target shape: {y_train.shape} ({'multi-target' if len(y_train.shape) > 1 and y_train.shape[1] > 1 else 'single target'})")
-        print(f"  Feature scaling stats (first 5):")
+        print("  Feature scaling stats (first 5):")
         print(f"    Means: {self.scaler.mean_[:5]}")
         print(f"    Scales: {self.scaler.scale_[:5]}")
         
